@@ -170,24 +170,23 @@ func testInclusionBatch(items []map[string]*dynamodb.AttributeValue, target int,
 	for _, item := range items {
 		requestSize := len(readRequest)
 		if requestSize == maxBatchSize {
-			rl.Acquire(maxBatchSize)
+			rl.Acquire("", maxBatchSize)
 			err := compareBatch(readRequest, target, cfg)
 			if err != nil {
 				log.Println("Failed to compare batch:", err)
-				log.Println(item)
+				log.Println(readRequest)
 			} else {
 				verbose(cfg, "Successfully compared %d items", requestSize)
 			}
-			readRequest = []map[string]*dynamodb.AttributeValue{item}
-		} else {
-			readRequest = append(readRequest, item)
+			readRequest = make([]map[string]*dynamodb.AttributeValue, 0)
 		}
+		readRequest = append(readRequest, item)
 	}
 
 	// maybe len(items) % maxBatchSize != 0 and there is still something to process
 	requestSize := len(readRequest)
 	if requestSize > 0 {
-		rl.Acquire(int64(requestSize))
+		rl.Acquire("", int64(requestSize))
 		err := compareBatch(readRequest, target, cfg)
 		if err != nil {
 			log.Println("Failed to compare batch:", err)
@@ -217,15 +216,15 @@ func testInclusion(fst int, snd int, cfg *appConfig) error {
 
 		successfulScan := false
 		for i := 0; i < cfg.maxConnectRetries; i++ {
-			rl.Acquire(1)
+			rl.Acquire("", 1)
 			result, err := cfg.dynamo[fst].Scan(input)
 			if err != nil {
 				backoff(i, "Scan")
 			} else {
+				testInclusionBatch(result.Items, snd, cfg)
 				successfulScan = true
 				lastEvaluatedKey = result.LastEvaluatedKey
 				verbose(cfg, "Scan: received %d items; last key:\n%v", len(result.Items), lastEvaluatedKey)
-				testInclusionBatch(result.Items, snd, cfg)
 				break
 			}
 		}
@@ -272,3 +271,6 @@ func main() {
 	testInclusion(src, dst, cfg)
 	testInclusion(dst, src, cfg)
 }
+
+// TODO: add checkpoints every 1000 rows or so
+// TODO: add a --quiet flag for when we don't care about checkpoints
